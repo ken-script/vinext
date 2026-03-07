@@ -39,6 +39,7 @@ import {
 import { scanMetadataFiles } from "./server/metadata-routes.js";
 import { staticExportPages } from "./build/static-export.js";
 import { detectPackageManager } from "./utils/project.js";
+import { asyncHooksStubPlugin } from "./plugins/async-hooks-stub.js";
 import tsconfigPaths from "vite-tsconfig-paths";
 import react, { Options as VitePluginReactOptions } from "@vitejs/plugin-react";
 import MagicString from "magic-string";
@@ -2314,6 +2315,8 @@ hydrate();
         }
       },
     },
+    // Stub node:async_hooks in client builds — see src/plugins/async-hooks-stub.ts
+    asyncHooksStubPlugin,
     // Proxy plugin for @mdx-js/rollup. The real MDX plugin is created lazily
     // during vinext:config's config() (when MDX files are detected), but
     // plugins returned from config() hooks run too late in the pipeline —
@@ -4142,3 +4145,4 @@ export { clientManualChunks, clientOutputConfig, clientTreeshakeConfig, computeL
 export { resolvePostcssStringPlugins as _resolvePostcssStringPlugins };
 export { parseStaticObjectLiteral as _parseStaticObjectLiteral };
 export { stripServerExports as _stripServerExports };
+export { asyncHooksStubPlugin as _asyncHooksStubPlugin };

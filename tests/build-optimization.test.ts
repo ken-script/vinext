@@ -11,6 +11,7 @@ import {
   clientTreeshakeConfig,
   computeLazyChunks,
   _stripServerExports,
+  _asyncHooksStubPlugin,
 } from "../packages/vinext/src/index.js";
 
 // The vinext config hook mutates process.env.NODE_ENV as a side effect (matching
@@ -1013,6 +1014,79 @@ describe("collectAssetTags lazy chunk filtering", () => {
 
     // framework.js should also appear with correct path
     expect(tags).toContain('<link rel="modulepreload" href="/assets/framework.js" />');
+  });
+});
+
+// ─── vinext:async-hooks-stub ───────────────────────────────────────────────────
+
+describe("vinext:async-hooks-stub", () => {
+  const VIRTUAL_ID = "\0vinext:async-hooks-stub";
+
+  // The resolveId handler uses `this.environment?.name`, so we call it with a
+  // mock context to control which environment is being simulated.
+  function resolveId(id: string, environmentName: string | undefined): string | undefined {
+    const handler = (_asyncHooksStubPlugin.resolveId as { handler: (id: string) => string | undefined }).handler;
+    return handler.call({ environment: environmentName ? { name: environmentName } : undefined }, id);
+  }
+
+  function load(id: string): string | undefined {
+    const handler = (_asyncHooksStubPlugin.load as { handler: (id: string) => string | undefined }).handler;
+    return handler.call({}, id);
+  }
+
+  describe("resolveId", () => {
+    it("resolves node:async_hooks to virtual module in client env", () => {
+      expect(resolveId("node:async_hooks", "client")).toBe(VIRTUAL_ID);
+    });
+
+    it("resolves bare async_hooks to virtual module in client env", () => {
+      expect(resolveId("async_hooks", "client")).toBe(VIRTUAL_ID);
+    });
+
+    it("returns undefined in ssr environment", () => {
+      expect(resolveId("node:async_hooks", "ssr")).toBeUndefined();
+    });
+
+    it("returns undefined in rsc environment", () => {
+      expect(resolveId("node:async_hooks", "rsc")).toBeUndefined();
+    });
+
+    it("returns undefined when environment is undefined", () => {
+      expect(resolveId("node:async_hooks", undefined)).toBeUndefined();
+    });
+  });
+
+  describe("load", () => {
+    it("returns stub source with AsyncLocalStorage class", () => {
+      const source = load(VIRTUAL_ID);
+      expect(source).toBeDefined();
+      expect(source).toContain("export class AsyncLocalStorage");
+      expect(source).toContain("getStore()");
+      expect(source).toContain("run(_store, fn, ...args)");
+    });
+
+    it("returns undefined for other module ids", () => {
+      expect(load("some-other-module")).toBeUndefined();
+    });
+
+    it("stub getStore() returns undefined and run() passes through callback return value", () => {
+      const source = load(VIRTUAL_ID)!;
+      // Evaluate the generated source to test actual runtime behavior, not just
+      // string shape. This catches subtle syntax errors that string matching misses.
+      // Strip the ES module `export` keyword so we can evaluate with new Function.
+      const cjsSource = source.replace(/^export\s+/m, "") + "\nreturn AsyncLocalStorage;";
+      const ALS = new Function(cjsSource)() as new () => {
+        getStore(): unknown;
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+        run(store: unknown, fn: Function, ...args: unknown[]): unknown;
+        exit(fn: () => unknown): unknown;
+      };
+      const als = new ALS();
+      expect(als.getStore()).toBeUndefined();
+      expect(als.run(42, () => "result")).toBe("result");
+      expect(als.run(42, (a: number, b: number) => a + b, 3, 4)).toBe(7);
+      expect(als.exit(() => "exit-result")).toBe("exit-result");
+    });
   });
 });
 
