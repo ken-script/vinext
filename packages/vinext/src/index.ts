@@ -41,6 +41,7 @@ import { scanMetadataFiles } from "./server/metadata-routes.js";
 import { staticExportPages } from "./build/static-export.js";
 import { detectPackageManager } from "./utils/project.js";
 import { asyncHooksStubPlugin } from "./plugins/async-hooks-stub.js";
+import { hasWranglerConfig, formatMissingCloudflarePluginError } from "./deploy.js";
 import tsconfigPaths from "vite-tsconfig-paths";
 import react, { Options as VitePluginReactOptions } from "@vitejs/plugin-react";
 import MagicString from "magic-string";
@@ -2303,6 +2304,23 @@ hydrate();
               "         Or: pass rsc: false to vinext() if you want to configure rsc() yourself.",
             );
           }
+        }
+
+        // Fail the build when targeting Cloudflare Workers without the
+        // cloudflare() plugin. Without it, wrangler's esbuild can't resolve
+        // virtual:vinext-rsc-entry and produces a cryptic error. (#325)
+        if (
+          config.command === "build" &&
+          !hasCloudflarePlugin &&
+          !hasNitroPlugin &&
+          hasWranglerConfig(root)
+        ) {
+          throw new Error(
+            formatMissingCloudflarePluginError({
+              isAppRouter: hasAppDir,
+              configFile: config.configFile,
+            }),
+          );
         }
       },
 
