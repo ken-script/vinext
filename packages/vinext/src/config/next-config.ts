@@ -10,6 +10,43 @@ import fs from "node:fs";
 import { PHASE_DEVELOPMENT_SERVER } from "../shims/constants.js";
 import { normalizePageExtensions } from "../routing/file-matcher.js";
 
+/**
+ * Parse a body size limit value (string or number) into bytes.
+ * Accepts Next.js-style strings like "1mb", "500kb", "10mb", bare number strings like "1048576" (bytes),
+ * and numeric values. Supports b, kb, mb, gb, tb, pb units.
+ * Returns the default 1MB if the value is not provided or invalid.
+ * Throws if the parsed value is less than 1.
+ */
+export function parseBodySizeLimit(value: string | number | undefined | null): number {
+  if (value === undefined || value === null) return 1 * 1024 * 1024;
+  if (typeof value === "number") {
+    if (value < 1) throw new Error(`Body size limit must be a positive number, got ${value}`);
+    return value;
+  }
+  const trimmed = value.trim();
+  const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb|tb|pb)?$/i);
+  if (!match) {
+    console.warn(
+      `[vinext] Invalid bodySizeLimit value: "${value}". Expected a number or a string like "1mb", "500kb". Falling back to 1MB.`,
+    );
+    return 1 * 1024 * 1024;
+  }
+  const num = parseFloat(match[1]);
+  const unit = (match[2] ?? "b").toLowerCase();
+  let bytes: number;
+  switch (unit) {
+    case "b": bytes = Math.floor(num); break;
+    case "kb": bytes = Math.floor(num * 1024); break;
+    case "mb": bytes = Math.floor(num * 1024 * 1024); break;
+    case "gb": bytes = Math.floor(num * 1024 * 1024 * 1024); break;
+    case "tb": bytes = Math.floor(num * 1024 * 1024 * 1024 * 1024); break;
+    case "pb": bytes = Math.floor(num * 1024 * 1024 * 1024 * 1024 * 1024); break;
+    default: return 1 * 1024 * 1024;
+  }
+  if (bytes < 1) throw new Error(`Body size limit must be a positive number, got ${bytes}`);
+  return bytes;
+}
+
 export interface HasCondition {
   type: "header" | "cookie" | "query" | "host";
   key: string;
@@ -168,6 +205,8 @@ export interface ResolvedNextConfig {
   allowedDevOrigins: string[];
   /** Extra allowed origins for server action CSRF validation (from experimental.serverActions.allowedOrigins). */
   serverActionsAllowedOrigins: string[];
+  /** Parsed body size limit for server actions in bytes (from experimental.serverActions.bodySizeLimit). Defaults to 1MB. */
+  serverActionsBodySizeLimit: number;
 }
 
 const CONFIG_FILES = [
@@ -289,6 +328,7 @@ export async function resolveNextConfig(
       aliases: {},
       allowedDevOrigins: [],
       serverActionsAllowedOrigins: [],
+      serverActionsBodySizeLimit: 1 * 1024 * 1024,
     };
   }
 
@@ -337,7 +377,7 @@ export async function resolveNextConfig(
     ? config.allowedDevOrigins
     : [];
 
-  // Resolve serverActions.allowedOrigins from experimental config
+  // Resolve serverActions.allowedOrigins and bodySizeLimit from experimental config
   const experimental = config.experimental as Record<string, unknown> | undefined;
   const serverActionsConfig = experimental?.serverActions as
     | Record<string, unknown>
@@ -347,6 +387,7 @@ export async function resolveNextConfig(
   )
     ? (serverActionsConfig.allowedOrigins as string[])
     : [];
+  const serverActionsBodySizeLimit = parseBodySizeLimit(serverActionsConfig?.bodySizeLimit as string | number | undefined);
 
   // Warn about unsupported webpack usage. We preserve alias injection and
   // extract MDX settings, but all other webpack customization is still ignored.
@@ -397,6 +438,7 @@ export async function resolveNextConfig(
     aliases,
     allowedDevOrigins,
     serverActionsAllowedOrigins,
+    serverActionsBodySizeLimit,
   };
 }
 
